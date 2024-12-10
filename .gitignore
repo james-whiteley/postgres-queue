@@ -1,0 +1,10 @@
+*
+!src/
+!src/**
+!jest.config.js
+!package.json
+!README.md
+!tsconfig.json
+!yarn.lock
+!/.gitignore
+!/.npmignore

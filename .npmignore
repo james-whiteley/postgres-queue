@@ -1,0 +1,11 @@
+.clinic
+examples
+node_modules
+src
+src-backup
+.env
+docker-compose.yml
+init.sql
+tsconfig.json
+yarn.lock
+*.tgz

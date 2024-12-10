@@ -1,0 +1,28 @@
+{
+	"name": "postgres-queue",
+	"version": "0.1.0",
+	"main": "dist/index.js",
+	"scripts": {
+		"prebuild": "rm -rf dist",
+		"build": "tsc",
+		"postbuild": "terser dist/index.js --compress --mangle --output dist/index.js && terser dist/worker-thread.js --compress --mangle --output dist/worker-thread.js",
+		"dev": "tsc --watch",
+		"test": "jest",
+  	"test:watch": "jest --watchAll --detectOpenHandles"
+	},
+	"devDependencies": {
+		"@types/jest": "^29.5.14",
+		"@types/node": "^22.10.1",
+		"@types/pg": "^8.11.10",
+		"dotenv": "^16.4.7",
+		"jest": "^29.7.0",
+		"terser": "^5.36.0",
+		"ts-jest": "^29.2.5",
+		"ts-node-dev": "^2.0.0",
+		"tslint": "^6.1.3",
+		"typescript": "^5.6.3"
+	},
+	"dependencies": {
+		"pg": "^8.13.1"
+	}
+}
