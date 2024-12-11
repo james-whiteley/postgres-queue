@@ -4,6 +4,7 @@
 !jest.config.js
 !package.json
 !README.md
+!LICENSE
 !tsconfig.json
 !yarn.lock
 !/.gitignore
