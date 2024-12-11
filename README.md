@@ -1,6 +1,6 @@
 # Postgres Queue
 
-This project is a simple queue implementation using PostgreSQL. It allows you to enqueue and dequeue tasks in a reliable and efficient manner.
+Job Queue written in Typescript and backed by PostgreSQL.
 
 ## Features
 
@@ -32,14 +32,14 @@ import { Queue } from '@james-whiteley/job-queue';
 const queue = new Queue('test-queue');
 
 queue
-	.enqueue({
-		data: { success: true },
-		delay: 5000,
-		retries: 0,
-		backoff_strategy: 'linear',
-		priority: priority
-	})
-	.then(() => console.log('Job added'));
+  .enqueue({
+    data: { success: true },
+    delay: 5000,
+    retries: 0,
+    backoff_strategy: 'linear',
+    priority: priority
+  })
+  .then(() => console.log('Job added'));
 ```
 
 ### Process Jobs
@@ -50,20 +50,20 @@ queue
 import { Consumer } from '@james-whiteley/job-queue';
 
 const consumer = new Consumer(
-	'test-queue',
-	async (job) => {
-  	const { id, data } = job;
-  	data.success = Math.random() >= 0.5;
+  'test-queue',
+  async (job) => {
+    const { id, data } = job;
+    data.success = Math.random() >= 0.5;
 
-  	if (!data.success) {
-  	  throw new Error('Job failed');
-  	}
+    if (!data.success) {
+      throw new Error('Job failed');
+    }
 
-  	return data;
-	},
-	{
-		processOrder: 'PRIORITY'
-	}
+    return data;
+  },
+  {
+    processOrder: 'PRIORITY'
+  }
 );
 
 consumer.run();
@@ -75,13 +75,13 @@ consumer.onJobCompleted(({ job, returnValue }) => {
 });
 
 consumer.onJobFailed(({ job, error }) => {
-	console.log('Job failed:', job.id);
-	console.log(error);
+  console.log('Job failed:', job.id);
+  console.log(error);
 });
 
 consumer.onJobRetry(({ job, error }) => {
-	console.log('Job retrying:', job.id);
- 	console.log(error);
+  console.log('Job retrying:', job.id);
+  console.log(error);
 });
 
 consumer.onQueueEmpty((data) => {
@@ -96,12 +96,12 @@ consumer.onQueueEmpty((data) => {
 import { Consumer } from '@james-whiteley/job-queue';
 
 const consumer = new Consumer(
-	'test-queue',
-	'job-function.js', // Path to separate file where function to be ran in job is exported
-	{
-		concurrency: 10,
-		processOrder: 'FIFO'
-	}
+  'test-queue',
+  'job-function.js', // Path to separate file where function to be ran in job is exported
+  {
+    concurrency: 10,
+    processOrder: 'FIFO'
+  }
 );
 
 consumer.run();
