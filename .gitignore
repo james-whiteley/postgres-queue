@@ -1,4 +1,5 @@
 *
+!.github/**
 !src/
 !src/**
 !jest.config.js
