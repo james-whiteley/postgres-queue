@@ -87,6 +87,13 @@ describe('Consumer', () => {
       oid: 0,
       fields: []
     });
+    jest.spyOn(consumer, 'query').mockResolvedValue({
+      rows: [],
+      command: '',
+      rowCount: 0,
+      oid: 0,
+      fields: []
+    } as never);
   });
 
   afterEach(async () => {
