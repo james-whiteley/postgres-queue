@@ -14,27 +14,25 @@ export class DBConnection extends Pool {
     });
   }
 
-  async queryWithoutRelease(query: any, values?: any): Promise<PoolClient> {
+  async queryWithoutRelease(query: string, values?: (string | number | object | undefined)[]): Promise<PoolClient> {
     const client = await this.connect();
     try {
       await client.query(query, values);
       return client;
-    } catch (error: any) {
+    } catch (error: unknown) {
       throw error;
     }
   }
 
-  async query(query: any, values?: any): Promise<QueryArrayResult> {
+  async queryAndRelease(query: string, values?: (string | number | object | undefined)[]): Promise<QueryArrayResult> {
     const client = await this.connect();
     try {
       return await client.query(query, values);
+    } catch (error: unknown) {
+      throw error;
     } finally {
       client.release();
     }
-  }
-
-  async release() {
-    await this.end();
   }
 }
 
@@ -48,31 +46,23 @@ export class Queue extends DBConnection {
     this.queueEvents = new EventEmitter();
   }
 
-  onQueueCompleted(listener: (data: any) => void) {
-    this.queueEvents.on('queue_completed', listener);
-  }
-
-  onProgress(listener: (data: any) => void) {
-    this.queueEvents.on('progress', listener);
-  }
-
   async enqueue(job: { data: object, delay?: number, retries?: number, backoff_strategy?: 'linear' | 'exponential', priority?: number }) {
     const query = 'INSERT INTO jobs (queue, data, delay, retries, backoff_strategy, priority) VALUES ($1, $2, $3, $4, $5, $6)';
     const values = [this.queueName, job.data, job.delay, job.retries, job.backoff_strategy, job.priority];
 
     try {
-      return await this.query(query, values);
-    } catch (error: any) {
-      throw new Error(error);
+      return await this.queryAndRelease(query, values);
+    } catch (error: unknown) {
+      throw error;
     }
   }
 
   async jobsInProgressCount() {
     try {
-      const res = await this.query('SELECT COUNT(*) FROM jobs WHERE status = \'processing\'');
+      const res = await this.queryAndRelease('SELECT COUNT(*) FROM jobs WHERE status = \'processing\'');
       return parseInt((res.rows[0] as unknown as { count: string }).count, 10);
-    } catch (error: any) {
-      throw new Error('Error querying jobs in progress', error);
+    } catch (error: unknown) {
+      throw error;
 
     }
   }
@@ -141,6 +131,8 @@ export class Consumer extends DBConnection {
     if (parallelismMethod === 'thread' && concurrency && concurrency > 1) {
       this.workers = new Set<Worker>();
     }
+
+    process.on('SIGINT', this.unlistenForJobNotifications.bind(this));
   }
 
   async getJob(): Promise<IJob | null> {
@@ -158,16 +150,16 @@ export class Consumer extends DBConnection {
       const res = await this.query(query);
 
       if (res.rows.length === 0) {
-        await this.query('ROLLBACK');
+        await this.queryAndRelease('ROLLBACK');
         return null;
       }
 
-      await this.query('COMMIT');
+      await this.queryAndRelease('COMMIT');
 
       return res.rows[0] as unknown as IJob;
-    } catch (error: any) {
-      await this.query('ROLLBACK');
-      throw new Error(error);
+    } catch (error: unknown) {
+      await this.queryAndRelease('ROLLBACK');
+      throw error;
     }
   }
 
@@ -194,10 +186,8 @@ export class Consumer extends DBConnection {
           this.run();
         }
       });
-
-      process.on('SIGINT', this.unlistenForJobNotifications.bind(this));
-    } catch (err: any) {
-      console.error('Error setting up LISTEN/NOTIFY', err.stack);
+    } catch (error: unknown) {
+      console.error('Error listening for job notifications:', error);
     }
   }
 
@@ -252,15 +242,15 @@ export class Consumer extends DBConnection {
 
       const result = await this.callback(job);
 
-      const res = await this.query('UPDATE jobs SET status = $1, progress = 100, updated_at = NOW() WHERE id = $2 AND queue = $3 RETURNING *', ['completed', job.id, this.queueName]);
+      const res = await this.queryAndRelease('UPDATE jobs SET status = $1, progress = 100, updated_at = NOW() WHERE id = $2 AND queue = $3 RETURNING *', ['completed', job.id, this.queueName]);
       const completedJob = res.rows[0];
       this.workerEvents.emit('job_completed', { job: completedJob, returnValue: result });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (job.attempts === (job.retries + 1)) {
-        const failedJob = await this.query('UPDATE jobs SET status = $1, updated_at = NOW() WHERE id = $2 AND queue = $3 RETURNING *', ['failed', job.id, this.queueName]);
+        const failedJob = await this.queryAndRelease('UPDATE jobs SET status = $1, updated_at = NOW() WHERE id = $2 AND queue = $3 RETURNING *', ['failed', job.id, this.queueName]);
         this.workerEvents.emit('job_failed', failedJob.rows[0]);
       } else {
-        const retryJob = await this.query('UPDATE jobs SET attempts = $1, status = $2, updated_at = NOW() WHERE id = $3 AND queue = $4 RETURNING *', [Number(job.attempts) + 1, 'idle', job.id, this.queueName]);
+        const retryJob = await this.queryAndRelease('UPDATE jobs SET attempts = $1, status = $2, updated_at = NOW() WHERE id = $3 AND queue = $4 RETURNING *', [Number(job.attempts) + 1, 'idle', job.id, this.queueName]);
         this.workerEvents.emit('job_retry', retryJob.rows[0]);
       }
     }
@@ -297,7 +287,7 @@ export class Consumer extends DBConnection {
       }
     );
 
-    worker.on('message', (data: any) => {
+    worker.on('message', (data: { action: string, job?: IJob, returnValue?: unknown, error?: unknown}) => {
       // Handle worker activity
       const { action } = data;
 
@@ -326,11 +316,11 @@ export class Consumer extends DBConnection {
       }
     });
 
-    worker.on('error', (error: any) => {
+    worker.on('error', (error: unknown) => {
       console.error('Worker error:', error);
     });
 
-    worker.on('exit', async (code: any) => {
+    worker.on('exit', async (code: number) => {
       worker.removeAllListeners();
 
       // Remove the worker from the active workers set
@@ -340,15 +330,15 @@ export class Consumer extends DBConnection {
         // No more jobs to process
         if (this.workers?.size === 0) {
           try {
-            const res = await this.query(`SELECT status, COUNT(*) FROM jobs WHERE queue = '${this.queueName}' AND status IN ('completed', 'failed') GROUP BY status`);
+            const res = await this.queryAndRelease(`SELECT status, COUNT(*) FROM jobs WHERE queue = '${this.queueName}' AND status IN ('completed', 'failed') GROUP BY status`);
             const counts = res.rows.reduce((acc: any, row: any) => {
               acc[row.status] = row.count;
               return acc;
             }, {});
 
             this.workerEvents.emit('queue_empty', { queueName: this.queueName, counts });
-          } catch (err: any) {
-            console.error('Error querying job counts', err.stack);
+          } catch (error: unknown) {
+            console.error('Error querying job counts', error);
           }
         }
       } else if (code !== 0) {
@@ -358,15 +348,15 @@ export class Consumer extends DBConnection {
       } else {
         if (this.workers?.size === 0) {
           try {
-            const res = await this.query(`SELECT status, COUNT(*) FROM jobs WHERE queue = '${this.queueName}' AND status IN ('completed', 'failed') GROUP BY status`);
+            const res = await this.queryAndRelease(`SELECT status, COUNT(*) FROM jobs WHERE queue = '${this.queueName}' AND status IN ('completed', 'failed') GROUP BY status`);
             const counts = res.rows.reduce((acc: any, row: any) => {
               acc[row.status] = row.count;
               return acc;
             }, {});
 
             this.workerEvents.emit('queue_empty', { queueName: this.queueName, counts });
-          } catch (err: any) {
-            console.error('Error querying job counts', err.stack);
+          } catch (error: unknown) {
+            console.error('Error querying job counts', error);
           }
         }
       }
@@ -389,7 +379,7 @@ export class Consumer extends DBConnection {
     }
   }
 
-  onWorkerIdle(listener: (data: any) => void) {
+  onWorkerIdle(listener: () => void) {
     this.workerEvents.on('worker_idle', listener);
   }
 
@@ -413,7 +403,7 @@ export class Consumer extends DBConnection {
     this.workerEvents.on('job_retry', listener);
   }
 
-  onQueueEmpty(listener: (data: any) => void) {
+  onQueueEmpty(listener: (data: { queueName: string, counts: { failed?: number, completed?: number }}) => void) {
     this.workerEvents.on('queue_empty', listener);
   }
 

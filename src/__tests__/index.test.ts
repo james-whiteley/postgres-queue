@@ -16,7 +16,7 @@ describe('Queue', () => {
 
   beforeEach(() => {
     queue = new Queue(queueName);
-    jest.spyOn(queue, 'query').mockResolvedValue({
+    jest.spyOn(queue, 'queryAndRelease').mockResolvedValue({
       rows: [],
       command: '',
       rowCount: 0,
@@ -38,28 +38,14 @@ describe('Queue', () => {
     const job: { data: object, delay?: number, retries?: number, backoff_strategy?: 'linear' | 'exponential', priority?: number } = { data: { key: 'value' }, delay: 1000, retries: 3, backoff_strategy: 'linear', priority: 1 };
     await queue.enqueue(job);
 
-    expect(queue.query).toHaveBeenCalledWith(
+    expect(queue.queryAndRelease).toHaveBeenCalledWith(
       'INSERT INTO jobs (queue, data, delay, retries, backoff_strategy, priority) VALUES ($1, $2, $3, $4, $5, $6)',
       [queueName, job.data, job.delay, job.retries, job.backoff_strategy, job.priority]
     );
   });
 
-  it('should handle queue completed events', () => {
-    const listener = jest.fn();
-    queue.onQueueCompleted(listener);
-    queue.queueEvents.emit('queue_completed', { data: 'test' });
-    expect(listener).toHaveBeenCalledWith({ data: 'test' });
-  });
-
-  it('should handle progress events', () => {
-    const listener = jest.fn();
-    queue.onProgress(listener);
-    queue.queueEvents.emit('progress', { progress: 50 });
-    expect(listener).toHaveBeenCalledWith({ progress: 50 });
-  });
-
   it('should count jobs in progress correctly', async () => {
-    jest.spyOn(queue, 'query').mockResolvedValueOnce({
+    jest.spyOn(queue, 'queryAndRelease').mockResolvedValueOnce({
       rows: [{ count: 3 }] as unknown as [{ count: string }][],
       command: '',
       rowCount: 3,
@@ -94,7 +80,7 @@ describe('Consumer', () => {
   beforeEach(() => {
     consumer = new Consumer(queueName, callback, { concurrency: 2, processOrder: 'FIFO', parallelismMethod: 'thread' });
     jest.spyOn(consumer.workerEvents, 'emit');
-    jest.spyOn(consumer, 'query').mockResolvedValue({
+    jest.spyOn(consumer, 'queryAndRelease').mockResolvedValue({
       rows: [],
       command: '',
       rowCount: 0,
