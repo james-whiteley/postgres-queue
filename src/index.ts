@@ -71,8 +71,9 @@ export class Queue extends DBConnection {
     try {
       const res = await this.query('SELECT COUNT(*) FROM jobs WHERE status = \'processing\'');
       return parseInt((res.rows[0] as unknown as { count: string }).count, 10);
-    } catch (err: any) {
-      console.error('Error querying jobs in progress', err.stack);
+    } catch (error: any) {
+      throw new Error('Error querying jobs in progress', error);
+
     }
   }
 }

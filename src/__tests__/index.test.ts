@@ -16,6 +16,13 @@ describe('Queue', () => {
 
   beforeEach(() => {
     queue = new Queue(queueName);
+    jest.spyOn(queue, 'query').mockResolvedValue({
+      rows: [],
+      command: '',
+      rowCount: 0,
+      oid: 0,
+      fields: []
+    });
   });
 
   afterEach(async () => {
@@ -29,13 +36,6 @@ describe('Queue', () => {
 
   it('should enqueue a job correctly', async () => {
     const job: { data: object, delay?: number, retries?: number, backoff_strategy?: 'linear' | 'exponential', priority?: number } = { data: { key: 'value' }, delay: 1000, retries: 3, backoff_strategy: 'linear', priority: 1 };
-    const querySpy = jest.spyOn(queue, 'query').mockResolvedValueOnce({
-      rows: [{ count: 1 }] as any,
-      command: '',
-      rowCount: 1,
-      oid: 0,
-      fields: []
-    });
     await queue.enqueue(job);
 
     expect(queue.query).toHaveBeenCalledWith(
@@ -60,7 +60,7 @@ describe('Queue', () => {
 
   it('should count jobs in progress correctly', async () => {
     jest.spyOn(queue, 'query').mockResolvedValueOnce({
-      rows: [{ count: 3 }] as any,
+      rows: [{ count: 3 }] as unknown as [{ count: string }][],
       command: '',
       rowCount: 3,
       oid: 0,
@@ -94,6 +94,13 @@ describe('Consumer', () => {
   beforeEach(() => {
     consumer = new Consumer(queueName, callback, { concurrency: 2, processOrder: 'FIFO', parallelismMethod: 'thread' });
     jest.spyOn(consumer.workerEvents, 'emit');
+    jest.spyOn(consumer, 'query').mockResolvedValue({
+      rows: [],
+      command: '',
+      rowCount: 0,
+      oid: 0,
+      fields: []
+    });
   });
 
   afterEach(async () => {
@@ -139,7 +146,6 @@ describe('Consumer', () => {
   });
 
   test('should handle job failure and retry', async () => {
-
     const retryJob = { ...job, retries: 1 };
     const getJobSpy = jest.spyOn(consumer, 'getJob').mockResolvedValueOnce(retryJob);
     const delayJobSpy = jest.spyOn(consumer, 'delayJob').mockResolvedValueOnce(undefined);
