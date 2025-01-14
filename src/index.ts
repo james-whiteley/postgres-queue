@@ -128,7 +128,7 @@ export class Consumer extends DBConnection {
       this.unlistenForJobNotifications();
     });
 
-    if (parallelismMethod === 'thread' && concurrency && concurrency > 1) {
+    if (this.parallelismMethod === 'thread' && this.concurrency && this.concurrency > 1) {
       this.workers = new Set<Worker>();
     }
 
@@ -139,15 +139,31 @@ export class Consumer extends DBConnection {
     try {
       await this.query('BEGIN');
 
-      let queryOrder = 'id ASC';
-      if (this.processOrder === 'LIFO') {
-        queryOrder = 'id DESC';
-      } else if (this.processOrder === 'PRIORITY') {
-        queryOrder = 'priority DESC';
+      let queryOrder: string;
+      switch (this.processOrder) {
+        case 'LIFO':
+          queryOrder = 'id DESC';
+          break;
+        case 'PRIORITY':
+          queryOrder = 'priority DESC, id ASC';
+          break;
+        default: // FIFO
+          queryOrder = 'id ASC';
+          break;
       }
 
-      const query = `UPDATE jobs SET status = 'processing', updated_at = NOW() WHERE id = (SELECT id FROM jobs WHERE queue = '${this.queueName}' AND status = 'idle' ORDER BY ${queryOrder} LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *;`;
-      const res = await this.query(query);
+      const query = `
+        UPDATE jobs 
+        SET status = 'processing', updated_at = NOW() 
+        WHERE id = (
+          SELECT id FROM jobs 
+          WHERE queue = $1 AND status = 'idle' 
+          ORDER BY ${queryOrder} LIMIT 1 
+          FOR UPDATE SKIP LOCKED
+        ) 
+        RETURNING *`;
+
+      const res = await this.query(query, [this.queueName]);
 
       if (res.rows.length === 0) {
         await this.queryAndRelease('ROLLBACK');
@@ -155,7 +171,6 @@ export class Consumer extends DBConnection {
       }
 
       await this.queryAndRelease('COMMIT');
-
       return res.rows[0] as unknown as IJob;
     } catch (error: unknown) {
       await this.queryAndRelease('ROLLBACK');
