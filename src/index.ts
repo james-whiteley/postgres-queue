@@ -58,12 +58,14 @@ export class Queue extends DBConnection {
   }
 
   async jobsInProgressCount() {
+    const client = await this.connect();
     try {
-      const res = await this.queryAndRelease('SELECT COUNT(*) FROM jobs WHERE status = \'processing\'');
+      const res = await client.query('SELECT COUNT(*) FROM jobs WHERE queue = $1 AND status = \'processing\'', [this.queueName]);
       return parseInt((res.rows[0] as unknown as { count: string }).count, 10);
     } catch (error: unknown) {
       throw error;
-
+    } finally {
+      client.release();
     }
   }
 }
@@ -136,8 +138,9 @@ export class Consumer extends DBConnection {
   }
 
   async getJob(): Promise<IJob | null> {
+    const client = await this.connect();
     try {
-      await this.query('BEGIN');
+      await client.query('BEGIN');
 
       let queryOrder: string;
       switch (this.processOrder) {
@@ -158,23 +161,25 @@ export class Consumer extends DBConnection {
         WHERE id = (
           SELECT id FROM jobs 
           WHERE queue = $1 AND status = 'idle' 
-          ORDER BY ${queryOrder} LIMIT 1 
+          ORDER BY $2 LIMIT 1 
           FOR UPDATE SKIP LOCKED
         ) 
         RETURNING *`;
 
-      const res = await this.query(query, [this.queueName]);
+      const res = await client.query(query, [this.queueName, queryOrder]);
 
       if (res.rows.length === 0) {
-        await this.queryAndRelease('ROLLBACK');
+        await client.query('ROLLBACK');
         return null;
       }
 
-      await this.queryAndRelease('COMMIT');
+      await client.query('COMMIT');
       return res.rows[0] as unknown as IJob;
     } catch (error: unknown) {
-      await this.queryAndRelease('ROLLBACK');
+      await client.query('ROLLBACK');
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -344,8 +349,9 @@ export class Consumer extends DBConnection {
       if (code === 1001) {
         // No more jobs to process
         if (this.workers?.size === 0) {
+          const client = await this.connect();
           try {
-            const res = await this.queryAndRelease(`SELECT status, COUNT(*) FROM jobs WHERE queue = '${this.queueName}' AND status IN ('completed', 'failed') GROUP BY status`);
+            const res = await client.query(`SELECT status, COUNT(*) FROM jobs WHERE queue = $1 AND status IN ('completed', 'failed') GROUP BY status`, [this.queueName]);
             const counts = res.rows.reduce((acc: any, row: any) => {
               acc[row.status] = row.count;
               return acc;
@@ -354,6 +360,8 @@ export class Consumer extends DBConnection {
             this.workerEvents.emit('queue_empty', { queueName: this.queueName, counts });
           } catch (error: unknown) {
             console.error('Error querying job counts', error);
+          } finally {
+            client.release();
           }
         }
       } else if (code !== 0) {
@@ -362,8 +370,9 @@ export class Consumer extends DBConnection {
         newIdleWorker.postMessage({ action: 'start_job' });
       } else {
         if (this.workers?.size === 0) {
+          const client = await this.connect();
           try {
-            const res = await this.queryAndRelease(`SELECT status, COUNT(*) FROM jobs WHERE queue = '${this.queueName}' AND status IN ('completed', 'failed') GROUP BY status`);
+            const res = await client.query(`SELECT status, COUNT(*) FROM jobs WHERE queue = $1 AND status IN ('completed', 'failed') GROUP BY status`, [this.queueName]);
             const counts = res.rows.reduce((acc: any, row: any) => {
               acc[row.status] = row.count;
               return acc;
@@ -372,6 +381,8 @@ export class Consumer extends DBConnection {
             this.workerEvents.emit('queue_empty', { queueName: this.queueName, counts });
           } catch (error: unknown) {
             console.error('Error querying job counts', error);
+          } finally {
+            client.release();
           }
         }
       }
