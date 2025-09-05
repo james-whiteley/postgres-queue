@@ -50,10 +50,15 @@ export class Queue extends DBConnection {
     const query = 'INSERT INTO jobs (queue, data, delay, retries, backoff_strategy, priority) VALUES ($1, $2, $3, $4, $5, $6)';
     const values = [this.queueName, job.data, job.delay, job.retries, job.backoff_strategy, job.priority];
 
+    const client = await this.connect();
     try {
-      return await this.queryAndRelease(query, values);
+      const res = await client.query(query, values);
+      await client.query('NOTIFY new_job_$1', [this.queueName]);
+      return res.rows[0];
     } catch (error: unknown) {
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -193,7 +198,7 @@ export class Consumer extends DBConnection {
         await this.unlistenForJobNotifications();
       }
 
-      this.jobListenerClient = await this.queryWithoutRelease('LISTEN new_job');
+      this.jobListenerClient = await this.queryWithoutRelease('LISTEN new_job_$1', [this.queueName]);
 
       // Listen for new job notifications
       this.jobListenerClient.on('notification', (msg) => {
@@ -216,7 +221,7 @@ export class Consumer extends DBConnection {
       return;
     }
 
-    await this.jobListenerClient?.query('UNLISTEN new_job');
+    await this.jobListenerClient?.query('UNLISTEN new_job_$1', [this.queueName]);
     this.jobListenerClient?.release();
     this.jobListenerClient = undefined;
   }
